@@ -1,0 +1,214 @@
+https://colab.research.google.com/drive/1lm9Trr3L2mqQgaziKKHe8Ec60tRMCWrI?usp=sharing
+
+
+
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+import warnings
+warnings.filterwarnings("ignore")
+
+#kullandığım csv: tidy_data_test.csv
+from google.colab import files
+uploaded = files.upload()
+
+#test için kullanacağı verileri sildim bunlar tidy_data_v2 deki 85,94,112 TD verileri ve ASD olarak 
+#burada kullanmadığım başlangı verilerinden 13 20 25i aldım
+df=pd.read_csv('tidy_data_test.csv')  
+df.shape
+
+#data daki idx değerlerini işime yaramadığı için sildim.
+del df['idx']
+
+#aşağıdaki datalarda TD çocuklar için boş kalan kısımlar var bunları
+#değişkenleri cinsinden yani int veya float olmak üzere 0 lar ile doldurdum
+df["FixGeo"].fillna(0, inplace = True)
+df['ET1_Age'].fillna(0, inplace=True)
+df['ETage'].fillna(0, inplace = True)
+df['Fixation_Duration_Geometric_AOI'].fillna(0, inplace = True)
+df['Fixation_Duration_Social_AOI'].fillna(0, inplace = True)
+df['Total_Fixation_Time'].fillna(0, inplace = True)
+df['Percent_Fixation_Social'].fillna(0, inplace = True)
+df['Percent_Fixation_Geometric'].fillna(0, inplace = True)
+df['ADOS_CoSoTot'].fillna(int(0), inplace = True)
+df['ADOSatscan_age'].fillna(0, inplace = True)
+df['ADOSatscan_module'].fillna("0", inplace = True)
+
+#ASD ve TD değerlerinin dengeli olması için başlangıçtan 50 tane ASDli
+#datayı kullanmadım
+df=df.iloc[50:164]
+
+#CaseControl değerlerini int e çevirdim 
+#ASD:1 TD:0 olarak kaydettim
+df['CaseControl'].replace({'ASD':int(1), 'TD':int(0)},inplace=True)
+
+#ADOSatscan_module sütununda Module1, Module2, Toddler ve boş satırlar vardı
+#bunları kullanabilmek aşağıdaki fonksiyon ile hepsini sütun haline getirdim
+#ve ADOSatscan sütununu artık bu şekilde kullanacağım için sildim.
+#concat satırları sütun yapıyor
+ADOSatscan = pd.get_dummies(df['ADOSatscan_module'], drop_first = True)
+df = pd.concat([df, ADOSatscan], axis=1)
+del df['ADOSatscan_module']
+
+#cinsiyet değişkenini de kadın:1 erkek:0 yaptım
+df['sex'].replace({'F':int(1),'M':int(0)},inplace=True)
+
+#burada ASD ve TD verlerimim dengesine baktım, birbirlerine yakın olması tavsiye edilir.
+df['CaseControl'].value_counts(normalize = True)
+
+from sklearn.model_selection import train_test_split  
+# %60 train, %20 validation, %20 test
+seed=111   
+X = df.drop('CaseControl', axis=1)
+y = df['CaseControl']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.4, 
+                                                    random_state = seed)
+
+X_val, X_test, y_val, y_test = train_test_split(X_test, y_test, test_size = 0.5, 
+                                                    random_state = seed)
+
+
+X.shape
+X.info()
+
+
+#Lojistik regresyon
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GridSearchCV
+
+lr = LogisticRegression(random_state = seed)
+
+lr_hyp = {'C':[0.001, 0.01, 0.1, 1, 10, 100]}
+
+lr_cv= GridSearchCV(lr, lr_hyp, cv = 5)
+
+lr_cv.fit(X_train, y_train)
+
+print(lr_cv.best_score_)
+print(lr_cv.best_estimator_)
+
+
+#Random Forrest
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+RF = RandomForestClassifier(random_state=seed)
+RF_hyp = {'n_estimators':[5, 10, 20, 50, 100, 200],
+          'max_depth':[None, 2, 5, 10, 15, 20]}
+
+RF_cv = GridSearchCV(RF, RF_hyp, cv = 5)
+RF_cv.fit(X_train, y_train)
+
+print(RF_cv.best_score_)
+print(RF_cv.best_estimator_)
+
+
+
+# SVM
+
+from sklearn.svm import SVC
+
+sv = SVC(random_state = seed)
+sv_hyp = {'C': [0.1, 1, 10], 'kernel':['linear', 'rbf']}
+
+svm_cv = GridSearchCV(sv, sv_hyp, cv=5)
+svm_cv.fit(X_train, y_train)
+           
+print(svm_cv.best_score_)
+print(svm_cv.best_estimator_)
+
+#Bagging Sınıflandırma
+
+from sklearn.ensemble import BaggingClassifier
+
+bc = BaggingClassifier(random_state=seed)
+
+bc_hyp = {'n_estimators': [5, 10, 20, 50, 100, 200]}
+
+bc_cv = GridSearchCV(bc, bc_hyp, cv=5)
+
+bc_cv.fit(X_train, y_train)
+
+print(bc_cv.best_score_)
+print(bc_cv.best_estimator_)
+
+
+#Performansların değerlendirilmesi ve modelin seçimi
+
+def model_evaluation(model, features, labels):
+  pred = model.predict(features)
+  score = accuracy_score(y_val, pred)
+  print('Score globale du modele:' , round(score, 3))
+  
+  
+  models = [lr_cv.best_estimator_, RF_cv.best_estimator_,
+          svm_cv.best_estimator_, bc_cv.best_estimator_]
+
+for model in models:
+  print('Model' + str(model))
+  model_evaluation(model, X_val, y_val)
+  print('-'*90)
+  
+#En iyi modelin test verileriyle performansı 
+
+accuracy_score(y_test, bc_cv.best_estimator_.predict(X_test))
+
+#test iin kullanacağım değerli, silmediğim csv den alıyorum 
+#kullandığım csv: tidy_data_v2.csv
+uploaded2 = files.upload()
+
+
+dfi=pd.read_csv('tidy_data_v2.csv')
+
+#yukarıdaki gibi önce cvs yi kullanabileceğim hale getiriyorum
+#boş verileri 0la dolduruyorum, bir sütunu satır yapıyorum vs. yukarıdaki gibi
+
+del dfi['idx']
+dfi["FixGeo"].fillna(0, inplace = True)
+dfi['ET1_Age'].fillna(0, inplace=True)
+dfi['ETage'].fillna(0, inplace = True)
+dfi['Fixation_Duration_Geometric_AOI'].fillna(0, inplace = True)
+dfi['Fixation_Duration_Social_AOI'].fillna(0, inplace = True)
+dfi['Total_Fixation_Time'].fillna(0, inplace = True)
+dfi['Percent_Fixation_Social'].fillna(0, inplace = True)
+dfi['Percent_Fixation_Geometric'].fillna(0, inplace = True)
+dfi['ADOS_CoSoTot'].fillna(int(0), inplace = True)
+dfi['ADOSatscan_age'].fillna(0, inplace = True)
+dfi['ADOSatscan_module'].fillna("0", inplace = True)
+
+ADOSatscani = pd.get_dummies(dfi['ADOSatscan_module'], drop_first = True)
+dfi = pd.concat([dfi, ADOSatscani], axis=1)
+del dfi['ADOSatscan_module']
+dfi['sex'].replace({'F':int(1),'M':int(0)},inplace=True)
+
+
+#Buradan test için kullanacağım, train veri setinde silinmiş olan 
+#satırları çekip birleştiriyorum. 
+#3 tane ASD, 3 tane TD aldım
+
+df1=dfi.iloc[13:14,:]
+df2=dfi.iloc[20:21,:]
+df3=dfi.iloc[25:26,:]
+df4=dfi.iloc[85:86,:]
+df5=dfi.iloc[94:95,:]
+df6=dfi.iloc[112:113,:]
+
+df_son=pd.concat([df1,df2,df3,df4,df5,df6])
+df_son
+
+
+
+#test edbilmek için CaseControl kısmını siliyorum.
+#yukarıda hangisi ASD hangisi TD bilmek için gösterdim
+del df_son['CaseControl']
+
+#istediğim satırı alıyorum
+test=df_son.iloc[0:1,:]
+test
+
+
+#aldığım veriyi predicte gönderiyorum ve tahmin sonucumu alıyorum
+pred=svm_cv.predict(test)
+print(pred)
